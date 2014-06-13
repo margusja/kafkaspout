@@ -53,11 +53,12 @@ import java.util.Map;
 import java.util.Properties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import java.io.IOException;
 
 import java.io.UnsupportedEncodingException;
 import storm.kafka.*;
+import org.apache.zookeeper.ZooKeeper;
 
-import com.deciderlab.kafka.*;
 
 public class KafkaConsumerSpout extends BaseRichSpout {
 	
@@ -69,13 +70,20 @@ public class KafkaConsumerSpout extends BaseRichSpout {
 	List<KafkaStream<byte[], byte[]>> streams;
 	private Properties props;
 	private long offset;
-	 public static final Logger LOG = LoggerFactory.getLogger(KafkaConsumerSpout.class);
+	public static final Logger LOG = LoggerFactory.getLogger(KafkaConsumerSpout.class);
+	private ZooKeeper zk;
 
 	public void open(Map conf, TopologyContext context,SpoutOutputCollector collector)
 	{
 		this.collector = collector;
 		this.topic = "kafkademo1";
 		this.offset = -1;
+		String connectionString = "vm24.dbweb.ee:2181,vm38.dbweb.ee:2181,vm24.dbweb.ee:2181";
+		try {
+			 zk = new ZooKeeper(connectionString, 5000, null);
+		} catch (IOException e) {
+			 e.printStackTrace();
+		}
 	}
 
 	// returns logsize current offset - this is NOT clients offset
@@ -83,7 +91,7 @@ public class KafkaConsumerSpout extends BaseRichSpout {
 	{
 	    long startOffsetTime = kafka.api.OffsetRequest.LatestTime();
 	    long offset = storm.kafka.KafkaUtils.getOffset(consumer, "kafkademo1", 0, startOffsetTime);
-	    LOG.info("Offset is: "+ offset);
+	    //Logger.info("Offset is: "+ offset);
 	    return offset;
 	}
 
@@ -95,8 +103,7 @@ public class KafkaConsumerSpout extends BaseRichSpout {
 	    if (this.offset == -1 )
 	     {
 		//this.offset = getOffset(consumer, topic, 0);
-		String connectionString = "vm24.dbweb.ee:2181,vm38.dbweb.ee:2181,vm24.dbweb.ee:2181";
-		this.offset = com.deciderlab.kafka.Zookeeper.getKafkaOffset(connectionString, 1000, "/consumers/kafkaspout/offsets/kafkademo1/0");
+		this.offset = com.deciderlab.kafka.Zookeeper.getKafkaOffset(zk, "/consumers/kafkaspout/offsets/kafkademo1/0");
 		System.out.println("Offset is: "+ offset);
              }
 	
@@ -125,8 +132,9 @@ public class KafkaConsumerSpout extends BaseRichSpout {
                 byte[] bytes = new byte[payload.limit()];
                 payload.get(bytes);
 		try {
-			System.out.println("Message... "+ String.valueOf(messageAndOffset.offset()) +" : "+ new String(bytes, "UTF-8"));
+			LOG.info("Message... "+ String.valueOf(messageAndOffset.offset()) +" : "+ new String(bytes, "UTF-8"));
 			this.collector.emit(new Values(new String(bytes, "UTF-8")), String.valueOf(messageAndOffset.offset()));
+			com.deciderlab.kafka.Zookeeper.setKafkaOffset(zk, "/consumers/kafkaspout/offsets/kafkademo1/0", offset);
 		}catch (UnsupportedEncodingException e) {
            	 	System.out.println("Oops:" + e);
         	}
@@ -160,7 +168,11 @@ public class KafkaConsumerSpout extends BaseRichSpout {
 	}
 
         public void close() {
-
+		 try {
+			zk.close();
+		} catch (InterruptedException e) {
+			e.printStackTrace();
+		}
         }
 
 }
